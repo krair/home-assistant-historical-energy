@@ -32,9 +32,7 @@ def create_engine(config):
         case 'sqlite':
             engine = db.create_engine(f"sqlite:///{config.get('path')}")
         case 'postgresql':
-            engine = db.create_engine(f"postgresql+psycopg2://\
-                {config.get('user')}:{config.get('password')}@\
-                {config.get('host')}:{config.get('port', 5432)}/{config.get('db_name')}")
+            engine = db.create_engine(f"postgresql+psycopg2://{config.get('user')}:{config.get('password')}@{config.get('host')}:{config.get('port', 5432)}/{config.get('db_name')}")
         case _:
             raise Exception('DB type not "sqlite" or "postgresql"!')
 
