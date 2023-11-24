@@ -24,8 +24,8 @@ def create_upsert_method(meta):
         #    for i in values_to_insert:
                 #if pd.isna(i['id']):
         #        i.pop('id')
-        except:
-            pass
+        #except:
+        #    pass
 
         # create insert statement using postgresql dialect.
         insert_stmt = insert(sql_table).values(values_to_insert)
