@@ -10,15 +10,18 @@ J'ai commencé ce projet en pensant à Enedis, car je vis en France. Malheureuse
 This project was heavily inspired by others with the same requirements: Inserting energy data into Home Assistant. The one catch being that we cannot natively insert data after it has occurred. This is a huge problem for some, as my electricity provider, Enedis, does not report real-time usage. Instead, we have access only to the data from the previous day, all at once. Thus, if we'd like to track our usage, it must be imported retroactively.
 
 Inspirations and credit:
-https://github.com/bokub/ha-linky
-https://github.com/patrickvorgers/HA-Import-Toon-Data/blob/main/Toon.sql
-https://gist.github.com/alexparunov/630b61c00c50dce40bb2bc9ebb3f28a0
+- https://github.com/bokub/ha-linky
+- https://github.com/patrickvorgers/HA-Import-Toon-Data/blob/main/Toon.sql
+- https://gist.github.com/alexparunov/630b61c00c50dce40bb2bc9ebb3f28a0
 
 ## Why not use an existing project?
 
-I really like what was done on https://github.com/bokub/ha-linky. In fact I wanted to use it in my own instance. However, there were two factors that held me back: Add-ons don't work in containerized installations of Home Assistant (and it isn't currently in HACS), and the fact that costs cannot be easily attached with their method used. Furthermore, the above project only works for Enedis users with a Linky meter in France.
+I really like what was done on https://github.com/bokub/ha-linky. In fact I wanted to use it in my own instance. However, there were two factors that held me back: 
 
-I hoped to create something that the wider community could also use with more generic and boilerplate code to assist others who don't want to dive into SQL directly.
+1) Add-ons don't work in containerized installations of Home Assistant (and it isn't currently in HACS)
+2) Costs cannot be easily attached with their method used. 
+
+Furthermore, the above project only works for Enedis users with a Linky meter in France. I hoped to create something that the wider community could also use with more generic and boilerplate code to assist others who don't want to dive into SQL directly.
 
 ## Pre-Installation
 
@@ -58,6 +61,28 @@ Currently, I haven't written in a way to import directly from a file like a CSV 
 ## Installation
 
 Installation is as easy as cloning this repository, building the container with the `Containerfile`, modifying the `config.yaml.example` file with your parameters, and running the container. It is currently setup to run as a one-shot service. Thus, if you want it to grab data from your energy provider daily, I recommend running it using a `cron` job.
+
+### Config File
+
+Most of the information needed is in the comments within the config file itself. I might add more here later if needed.
+
+Once you've put your values into the config file, I recommend mounting it into your container like such:
+
+**Docker/Podman run:**
+```
+... run ... -v ./config/config.yaml:/app/config/config.yaml ...
+```
+
+**Docker/Podman compose:**
+
+```
+services:
+  home-assistant-historical-energy:
+    ...
+    volumes:
+      - ./config/config.yaml:/app/config/config.yaml
+    ...
+```
 
 ## Limitations
 
