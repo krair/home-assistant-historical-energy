@@ -1,0 +1,154 @@
+##########################################################################
+# General Settings - example file. Rename to "config.yaml"
+
+# Set the timezone your data is currently in (this is for correct timestamps)
+timezone: 'Europe/Paris'
+
+################################################################################
+# Database Settings
+
+# Connection details for your database
+database:
+  # Currently it's only postgresql supported. SQLite *should* work as well but is untested!
+  type: postgresql
+
+  # use the config item below if you're using the default SQLite database
+  #path: /data/home-assistant_v2.db
+  
+  # Hostname (OF THE DATABASE) - can be an IP address, FQDN, or container name (if in the same network as the db!)
+  #host: https://homeassistant-database.example.com
+  #host: home-assitant-db
+  host: 192.168.122.253
+
+  # Default for PostgreSQL
+  port: 5432
+
+  # DB username
+  user: ha
+
+  # DB Password (hopefully can move to a more secure way like Docker/Podman secrets)
+  password: homeassistant
+
+  # DB name (often the same as the user above)
+  db_name: ha
+
+################################################################################
+# Home Assistant Settings
+
+# Connection details to HomeAssistant  
+homeassistant:
+  # URL can be IP address (with port), FQDN, or container name (if in the same container network!)
+  url: "http://192.168.122.253:8123"
+  #url: https://homeassistant.example.com
+  #url: http://ha-container
+
+  # To use the Home Assistant API to temporarily disable the statistics recorder, we need have an authenticated
+  #   user. This can be created by going to your user profile in the bottom left of your HA dashboard. Scroll to
+  #   the bottom and look for "Long-lived access tokens". Create one, and paste the token here. 
+  #   Eventually this will be able to be a Docker/Podman secret.
+  api_token: eyJh1234.veryLONGstrings.OFlettersANDnumbers
+
+# These are a list of the energy sensors themselves. I haven't created a lot of flexibility here yet. Please create
+#   an issue or PR on the GitHub page to help make it friendly to other API endpoints.  
+
+sensors:
+  # A sensor can be listed multiple times, depending on the reading and where you want it inserted
+  # Name is not used other than for logging purposes
+  - name: Enedis
+    
+    # This is the actual name of the sensor entity within Home Assistant 
+    sensor_name: sensor.enedis_consumption_total
+    
+    # Cost per kWh if you'd like to track the cost of the data we are inserting
+    cost: 0.2276
+    
+    # short or long term statistic: 
+    #   - short is for measurements that are more frequent than hourly, and will eventually be converted to hourly
+    #     in the long term statistics. Use this for things like 30 minute measurements.
+    #   - long is for historical measurements (like importing a previous year). These are usually hourly or more often daily
+    type: short
+    
+    ###################################################################
+    # API Request parameters
+
+    # The URL of the API that we will be accessing. Read more about how to find this in the GitHub Readme.
+    url: https://conso.boris.sh/api/consumption_load_curve
+    #url: https://conso.boris.sh/api/daily_consumption
+    
+    # When making the API request, there will often be certain parameters added to the end of the above request URL.
+    # These are everything after the question mark (?) in the following link:
+    #   https://conso.boris.sh/api/consumption_load_curve?prm=1234567890&start=2023-11-01&end=2023-11-05
+    #
+    # Depending on your API, it might look different. Anything you put under the parameters will be added to
+    #   the end of the request.
+    parameters:
+      # For Enedis, the "prm" is the number on your Linky box. This can be found in your Enedis account.
+      prm: 12345678901234
+      # The start and end dates you'd like to import
+      # If you'd like to get daily updates, you can run the container daily using cron jobs. In that case,
+      #   you don't have to hard-code a date, and instead can use "yesterday" and "today" like below.
+      #   Otherwise, the dates should be in ISO 8601 format (YYYY-MM-DD)
+      start: 2023-10-25
+      end: 2023-11-01
+      #start: yesterday
+      #end: today
+
+    # When making the API request, we will often need to provide a "token" or "key" which is used in place of a username
+    #   and password. This is usually passed in the request's headers using the "Authorization" header. Other headers can
+    #   be passed depending on the API you are using. For the one I am using here (https://conso.boris.sh), more info can
+    #   be found in their documentation: https://conso.boris.sh/documentation
+    #
+    # Anything you place below the "headers" key below will be passed to the request. Completely Optional.
+    headers:
+      Authorization: "Bearer eyJh1234.veryLONGstrings.OFlettersANDnumbers"
+      User-Agent: github.com/krair/home-assistant-historical-energy
+      From: info@rair.dev
+    
+    # When the requested data comes back from the API, it will often return in a JSON format. The following section
+    #   helps to correctly parse the received data. For example, the JSON returned might look like:
+    #
+    # {
+    #   "usage_point_id": "12345678901234",
+    #   "start": "2023-10-25",
+    #   "end": "2023-11-01",
+    #   "quality": "BRUT",
+    #   "reading_type": {
+    #         "unit": "Wh",
+    #         "measurement_kind": "energy",
+    #         "aggregate": "sum",
+    #         "measuring_period": "P1D"
+    #     },
+    #   "interval_reading": [
+    #   {
+    #       "value": "14139",
+    #       "date": "2023-10-01"
+    #    },
+    #     ...
+    data:
+      # In this case, we want to know the "location" of where the energy readings are. In the above example, we are looking
+      #   for the key "interval_reading". Inside this location is the list of energy readings we wish to add to HA.
+      location: interval_reading
+      
+      # What is the key within each reading used that contains the "date" or timestamp value
+      date: date
+
+      # What is the key within each reading used that contains the "value" we want to insert into the database
+      value: value
+
+      # Is the value a "measurement" at a point in time, or a "total_increasing" value that always increases.
+      # This can be determined by looking at a couple of the returned datapoints. For example, we know we used:
+      #   12.345 kWh, 13.045 kWh, 10.435 kWh over the course of 3 days.
+      #   If your three values in the JSON are: 12345, 13045, 10435 - they are measurements.
+      #   If your three values in the JSON are: 12345, 25390, 35825 - they are total_increasing.
+      type: measurement
+
+      # Unit of measurement - Normally this would be either "W"/"Wh" or "kW"/"kWh" 
+      # Currently there's no logic in the program to figure this out from the returned data directly
+      unit_of_measurement: W
+
+      # (Optional) If your measurements are less than daily, set this to the number if you need to correct your readings.
+      # Example: For Enedis' 30 minute readings, the energy used is reported as the "average" of what you actually used.
+      #   For some reason which I can't explain, this results in all the values being double their actual value.
+      #   This can be seen by comparing your "daily" consumption with the sum of your "30 min" interval consumption.
+      #   Thus, dividing these 30 min values by 2
+      conversion_factor: 0.5
