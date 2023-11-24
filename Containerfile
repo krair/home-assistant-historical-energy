@@ -4,7 +4,7 @@ COPY ./app /app
 
 COPY ./config /app/config
 
-RUN useradd -M -u 3737 python; \
+RUN useradd -d /app -u 3737 python; \
     chown -R python:python /app; \
     chmod -R 750 /app; \
     chmod 640 /app/config/*
