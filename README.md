@@ -1,5 +1,10 @@
 # Home Assistant Energy Importer
 
+![energy data in home assistant](screenshot-long-interval.webp "Long Term Statistics")
+---
+![energy data in home assistant](screenshot-short-interval.webp "Long Term Statistics")
+---
+
 ### FR
 J'ai commencé ce projet en pensant à Enedis, car je vis en France. Malheureusement, mon français écrit est très médiocre. Peut-être qu'un jour il s'améliorera et que je pourrai écrire ceci en français également. Je suis desolé.
 
