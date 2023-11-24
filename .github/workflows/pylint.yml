@@ -16,6 +16,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install Python dependencies
       uses: py-actions/py-dependency-install@v4
+      with:
+        path: "app/requirements.txt"
     - name: Install dependencies
       run: |
         pip install pylint
