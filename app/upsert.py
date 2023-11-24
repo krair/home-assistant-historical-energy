@@ -20,10 +20,10 @@ def create_upsert_method(meta):
         # The database will normally auto-assign the id anyways.
         # But I was still having problems with assigned id's, and dropping them
         #   doesn't seem to affect the database. Perhaps better to drop the column ahead.
-        try:
-            for i in values_to_insert:
+        #try:
+        #    for i in values_to_insert:
                 #if pd.isna(i['id']):
-                i.pop('id')
+        #        i.pop('id')
         except:
             pass
 
