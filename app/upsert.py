@@ -30,7 +30,7 @@ def create_upsert_method(meta):
         # create insert statement using postgresql dialect.
         insert_stmt = insert(sql_table).values(values_to_insert)
         # create update statement for excluded fields on conflict
-        update_stmt = {x.key: x for x in insert_stmt.excluded}
+        update_stmt = {x.key: x for x in insert_stmt.excluded if x.key != 'id'}
         #print(update_stmt)
         # create upsert statement. 
         upsert_stmt = insert_stmt.on_conflict_do_update(
