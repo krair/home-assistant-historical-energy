@@ -227,6 +227,8 @@ def generate_merged_df(conn, tables, metadata_id, df):
         # Correct missing 'metadata_id' columns
         df_merged['metadata_id'].fillna(metadata_id,inplace=True)
 
+        # Drop 'id' column as it isn't required. DB will auto-assign new rows
+        #   Old id's will be found anyways with the (metadata_id, start_ts) unique constraint
         del df_merged['id']
     
         write_data_db(df_merged, table, conn)

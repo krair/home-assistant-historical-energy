@@ -106,3 +106,28 @@ I don't (yet) produce any electricity, thus I haven't tested this with productio
 ### Standard Tariff
 
 I am on the standard single price model, thus the app is written with such in mind. It should be relatively easy to modify this if you are on a High Tariff/Low Tariff plan (HPHC in France). I just haven't looked into this yet.
+
+## Troubleshooting
+
+### sqlalchemy.exc.IntegrityError: (psycopg2.errors.UniqueViolation) duplicate key value violates unique constraint
+
+This error plagued me after migrating my default SQLite database to PostgreSQL. The problem is that during the migration, the constraints weren't copied correctly, and the main sequence column is out of sync - the database doesn't know where it should insert the "next" value, and when trying to insert (at the beginning), throws an error so not to overwrite an old value.
+
+Thank you to [some smart people](https://sigfried.be/blog/migrating-home-assistant-sqlite-to-postgresql/#commento-846f6ff20215cca22f98543048b0dce33998cd0f75c064186c1eaf74d66c4346), I found the issue was fixable by simply resetting the database's sequence value to the highest one unused. 
+
+You'll need to run this set of SQL statements on your database:
+
+```sql
+SELECT setval(pg_get_serial_sequence('statistics_runs', 'run_id'), coalesce(MAX(run_id), 1)) from statistics_runs;
+SELECT setval(pg_get_serial_sequence('statistics_meta', 'id'), coalesce(MAX(id), 1)) from statistics_meta;
+SELECT setval(pg_get_serial_sequence('statistics', 'id'), coalesce(MAX(id), 1)) from statistics;
+SELECT setval(pg_get_serial_sequence('statistics_short_term', 'id'), coalesce(MAX(id), 1)) from statistics_short_term;
+SELECT setval(pg_get_serial_sequence('states', 'state_id'), coalesce(MAX(state_id), 1)) from states;
+SELECT setval(pg_get_serial_sequence('state_attributes', 'attributes_id'), coalesce(MAX(attributes_id), 1)) from state_attributes;
+SELECT setval(pg_get_serial_sequence('events', 'event_id'), coalesce(MAX(event_id), 1)) from events;
+SELECT setval(pg_get_serial_sequence('event_data', 'data_id'), coalesce(MAX(data_id), 1)) from event_data;
+SELECT setval(pg_get_serial_sequence('recorder_runs', 'run_id'), coalesce(MAX(run_id), 1)) from recorder_runs;
+SELECT setval(pg_get_serial_sequence('schema_changes', 'change_id'), coalesce(MAX(change_id), 1)) from schema_changes;
+```
+
+Afterwards, you shouldn't run into this error any longer.
