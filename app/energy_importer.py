@@ -4,6 +4,7 @@ written by Kit Rairigh - https://github.com/krair and https://rair.dev
 '''
 
 import os
+import sys
 import time
 import sqlalchemy as db
 import json
@@ -14,6 +15,8 @@ from requests import post, get
 from pytz import utc
 from datetime import datetime, timedelta
 import yaml
+
+USAGE = f"Usage: python {sys.argv[0]} [--help] | --import (-i) <filename> <setting> (set in config file)"
 
 def load_config():
     with open(f'./config/config.yaml', 'r') as f:
@@ -188,6 +191,55 @@ def clean_data(data, config):
             raise Exception("Data type should be either 'measurement' or 'total_increasing'!")
     return df
 
+def clean_file(df, config):
+    '''
+    Parsing function to take the file data and normalize it.
+    '''
+
+    # Rename columns to HomeAssistant's names
+    df.rename(columns={config.get('state'):'state',config.get('date'):'start_ts'}, inplace=True)
+    
+    # Convert date to Unix timestamps as floats (if necessary)
+    match df['date'].dtype:
+        case np.int64 | np.float64:
+            pass
+        case _:
+            try:
+                # Convert from ISO to UNIX (UTC)
+                df['date'] = df['date'].apply(\
+                    lambda x: datetime.timestamp(datetime.fromisoformat(x).astimezone(utc)))
+                # Move data back 1 second to move the final data point from 00:00:00 to the night
+                #    before to fix HA graph for short intervals
+                if config.get('shift', None):
+                    df['date'] = df['date'].apply(lambda x: x + int(config.get('shift', None)))
+            except:
+                raise Exception('Date column is not in a familiar format (Unix or ISO)')
+
+    # Deal with DST crossover in fall (duplicate timestamps on short-term data)
+    dup_idx = df[df.duplicated('date')].index
+    if any(dup_idx):
+        # if we find any, move the duplicated entries back 1 second to avoid overlap
+        df.loc[dup_idx, ['date']] = [df.loc[dup_idx, ['date']].apply(lambda x: x - 1)]
+    
+    # Duplicate start_ts column - perhaps unnecessary
+    df['created_ts'] = df['start_ts']
+    
+    # Conversion of given units to kWh (what HomeAssistant uses)
+    cf = calculate_conversion_factor(config)
+    
+    match config.get('type'):
+        case 'measurement':
+            # Convert state values into kWh
+            df['state'] = df['state'].astype(float) * cf
+        case 'total_increasing':
+            # Change state column to measurements over the given period (sum calculated later)
+            df['new_state'] = df['state'].diff().fillna(df['state']).astype(float)
+            df['state'] = df['new_state']
+            del df_old['new_state']
+        case _:
+            raise Exception("Data type should be either 'measurement' or 'total_increasing'!")
+    return df
+
 def calculate_conversion_factor(config):
     '''
     If the data is not in kWh, we need to convert it. This is how we can help normalize it.
@@ -240,57 +292,113 @@ def write_data_db(df, table, conn):
     '''
     df.to_sql(table, conn, index=False, chunksize=200, if_exists="append",method=upsert_method)
 
-# Read local config
-config = load_config()
+def main(file):
+    # Read local config
+    config = load_config()
 
-# Set timezone (default in containers is UTC)
-if config.get('timezone'):
-    set_timezone(config.get('timezone'))
+    # Set timezone (default in containers is UTC)
+    if config.get('timezone'):
+        set_timezone(config.get('timezone'))
 
-# Create connection to the database
-conn = create_engine(config['database'])
-# Check the connection is available
-check_db_connection(conn)
-# Pull the metadata about the db's tables from the db
-metadata = pull_db_metadata(conn)
+    # Create connection to the database
+    conn = create_engine(config['database'])
+    # Check the connection is available
+    check_db_connection(conn)
+    # Pull the metadata about the db's tables from the db
+    metadata = pull_db_metadata(conn)
 
-# Create 'upsert' method using existing metadata
-upsert_method = upsert.create_upsert_method(metadata)
+    # Create 'upsert' method using existing metadata
+    upsert_method = upsert.create_upsert_method(metadata)
 
-# Each "sensor" gets it's own config section to ensure correct parsing and inserting
-for sensor in config.get('sensors'):
-    # The name of the energy sensor in HomeAssistant
-    sensor_name = sensor.get('sensor_name')
+    if not file:
+        # Each "sensor" gets it's own config section to ensure correct parsing and inserting
+        for sensor in config.get('sensors'):
+            # The name of the energy sensor in HomeAssistant
+            sensor_name = sensor.get('sensor_name')
 
-    # Get the metadata_id to use in the db tables
-    metadata_id = get_metadata_ids(sensor_name)
-    
-    # Configure the API request and run it
-    request_config = build_request(sensor)
-    data = api_request(request_config)
-    df = clean_data(data, sensor)
-    # Temporarily disable ha's recorder from recording new statistics
-    ha_recorder_switch(config.get('homeassistant'),'disable')
+            # Get the metadata_id to use in the db tables
+            metadata_id = get_metadata_ids(sensor_name)
+            
+            # Configure the API request and run it
+            request_config = build_request(sensor)
+            data = api_request(request_config)
+            df = clean_data(data, sensor)
+            # Temporarily disable ha's recorder from recording new statistics
+            ha_recorder_switch(config.get('homeassistant'),'disable')
 
-    # Which tables should we enter the data into (long for one measurement per day, or short for more frequent)
-    match sensor.get('type'):
-        case 'long':
-            tables = ['statistics']
-        case 'short':
-            tables = ['statistics_short_term', 'statistics']
+            # Which tables should we enter the data into (long for one measurement per day, or short for more frequent)
+            match sensor.get('type'):
+                case 'long':
+                    tables = ['statistics']
+                case 'short':
+                    tables = ['statistics_short_term', 'statistics']
 
-    generate_merged_df(conn, tables, metadata_id[0], df)
+            generate_merged_df(conn, tables, metadata_id[0], df)
 
-    # Cost per kWh
-    cost = sensor.get('cost', None)
+            # Cost per kWh
+            cost = sensor.get('cost', None)
 
-    if cost:
-        # Convert measurement to monetary cost
-        df['state'] = df['state'].apply(lambda x: x * cost)
-        generate_merged_df(conn, tables, metadata_id[1], df)
-    
-    # Commit our changes and close the connection
-    conn.commit()
-    conn.close()
-    # Re-enable ha's recorder for recording new statistics
-    ha_recorder_switch(config.get('homeassistant'),'enable')
+            if cost:
+                # Convert measurement to monetary cost
+                df['state'] = df['state'].apply(lambda x: x * cost)
+                generate_merged_df(conn, tables, metadata_id[1], df)
+            
+            # Commit our changes and close the connection
+            conn.commit()
+            conn.close()
+            # Re-enable ha's recorder for recording new statistics
+            ha_recorder_switch(config.get('homeassistant'),'enable')
+
+    else:
+        with open(file[0]) as f:
+            df_file = pd.read_csv(f)
+
+        # Get the correct configuration setting for the file from CLI args
+        sensor = [i for i in config.get('sensors') if i.get('file',None) == file[1]][0]
+
+        # The name of the energy sensor in HomeAssistant
+        sensor_name = sensor.get('sensor_name')
+
+        # Get the metadata_id to use in the db tables
+        metadata_id = get_metadata_ids(sensor_name)
+
+        df = clean_file(df_file, sensor.get('data'))
+
+        ha_recorder_switch(config.get('homeassistant'),'disable')
+
+        # Which tables should we enter the data into (long for one measurement per day, or short for more frequent)
+        match sensor.get('type'):
+            case 'long':
+                tables = ['statistics']
+            case 'short':
+                tables = ['statistics_short_term', 'statistics']
+
+        generate_merged_df(conn, tables, metadata_id[0], df)
+
+        # Cost per kWh
+        cost = sensor.get('cost', None)
+
+        if cost:
+            # Convert measurement to monetary cost
+            df['state'] = df['state'].apply(lambda x: x * cost)
+            generate_merged_df(conn, tables, metadata_id[1], df)
+        
+        # Commit our changes and close the connection
+        conn.commit()
+        conn.close()
+        # Re-enable ha's recorder for recording new statistics
+        ha_recorder_switch(config.get('homeassistant'),'enable')
+
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+
+    if not args:
+        main(None)
+    else:
+        match args[0]:
+            case '--import' | '-i':
+                main(args)
+            case _:
+                raise SystemExit(USAGE)
