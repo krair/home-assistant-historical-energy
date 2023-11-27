@@ -137,9 +137,7 @@ def clean_data(data, config):
     Perhaps this could be made more generic to fit other energy providers.
     '''
     # Only pull necessary data across to dataframe
-    filter_data = [{'value': j.get(config["data"]["value"]), \
-    'date': j.get(config["data"]["date"])} for j in \
-    data.get(config["data"]["location"])]
+    filter_data = [{'value': j.get(config["data"]["value"]), 'date': j.get(config["data"]["date"])} for j in data.get(config["data"]["location"])]
     
     # Normalize data
     df = pd.DataFrame.from_dict(filter_data, orient='columns')
@@ -151,8 +149,7 @@ def clean_data(data, config):
         case _:
             try:
                 # Convert from ISO to UNIX (UTC)
-                df['date'] = df['date'].apply(\
-                    lambda x: datetime.timestamp(datetime.fromisoformat(x).astimezone(utc)))
+                df['date'] = df['date'].apply(lambda x: datetime.timestamp(datetime.fromisoformat(x).astimezone(utc)))
                 # Move data back 1 second to move the final data point from 00:00:00 to the night
                 #    before to fix HA graph for short intervals
                 if sensor.get('type') == 'short':
@@ -178,7 +175,7 @@ def clean_data(data, config):
     match config.get('data').get('type'):
         case 'measurement':
             # Convert state values into kWh
-            df['state'] = df['state'].astype(float) * cf
+            df['state'] = df['state'].apply(lambda x: x * cf)
         case 'total_increasing':
             # Change state column to measurements over the given period (sum calculated later)
             df['new_state'] = df['state'].diff().fillna(df['state']).astype(float)
