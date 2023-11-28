@@ -175,7 +175,7 @@ def clean_data(data, config):
     match config.get('data').get('type'):
         case 'measurement':
             # Convert state values into kWh
-            df['state'] = df['state'].apply(lambda x: x * cf)
+            df['state'] = df['state'].astype(float).apply(lambda x: x * cf)
         case 'total_increasing':
             # Change state column to measurements over the given period (sum calculated later)
             df['new_state'] = df['state'].diff().fillna(df['state']).astype(float)
