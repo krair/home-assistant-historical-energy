@@ -199,7 +199,7 @@ def calculate_conversion_factor(config):
         case _:
             raise Exception('Unit of measurement should be in "W" or "kW"!')
     
-    cf_config = int(config.get('conversion_factor', 1))
+    cf_config = float(config.get('conversion_factor', 1))
     return float(unit_cf * cf_config)
     
 def generate_merged_df(conn, tables, metadata_id, df):
