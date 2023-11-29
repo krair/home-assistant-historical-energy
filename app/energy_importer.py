@@ -177,7 +177,7 @@ def clean_data(data, config):
     df['created_ts'] = df['start_ts']
     
     # Conversion of given units to kWh (what HomeAssistant uses)
-    cf = calculate_conversion_factor(config.get('data'))
+    cf = calculate_conversion_factor(config)
     
     match config.get('data').get('type'):
         case 'measurement':
