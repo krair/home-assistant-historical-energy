@@ -179,7 +179,7 @@ def clean_data(data, config):
     # Conversion of given units to kWh (what HomeAssistant uses)
     cf = calculate_conversion_factor(config)
     
-    match config.get('data').get('type'):
+    match config.get('type'):
         case 'measurement':
             # Convert state values into kWh
             df['state'] = df['state'].astype(float).apply(lambda x: x * cf)
