@@ -137,7 +137,11 @@ def clean_data(data, config):
     Perhaps this could be made more generic to fit other energy providers.
     '''
     # Only pull necessary data across to dataframe
-    filter_data = [{'value': j.get(config["data"]["value"]), 'date': j.get(config["data"]["date"])} for j in data.get(config["data"]["location"])]
+    data_location = config.get("location")
+    state_name = config.get("state")
+    date_name = config.get("date")
+    # Create list of dictionary items (to be pulled into a pandas DataFrame)
+    filter_data = [{'state': j.get(state_name), 'start_ts': j.get(date_name)} for j in data.get(data_location)]
     
     # Normalize data
     df = pd.DataFrame.from_dict(filter_data, orient='columns')
@@ -150,12 +154,15 @@ def clean_data(data, config):
             try:
                 # Convert from ISO to UNIX (UTC)
                 df['date'] = df['date'].apply(lambda x: datetime.timestamp(datetime.fromisoformat(x).astimezone(utc)))
-                # Move data back 1 second to move the final data point from 00:00:00 to the night
-                #    before to fix HA graph for short intervals
-                if sensor.get('type') == 'short':
-                    df['date'] = df['date'].apply(lambda x: x-1)
             except:
                 raise Exception('Date column is not in a familiar format (Unix or ISO)')
+
+    
+    # If needed, move data by a given amount to move the edge data points (ex: from 00:00:00 to the night
+    #    before) to fix HA graph for intervals shorter than 1 day
+    time_offset = config.get('time_offset')
+    if time_offset:
+        df['date'] = df['date'].apply(lambda x: x + int(time_offset))
 
     # Deal with DST crossover in fall (duplicate timestamps on short-term data)
     dup_idx = df[df.duplicated('date')].index
@@ -265,7 +272,7 @@ for sensor in config.get('sensors'):
     # Configure the API request and run it
     request_config = build_request(sensor)
     data = api_request(request_config)
-    df = clean_data(data, sensor)
+    df = clean_data(data, sensor.get('data'))
     # Temporarily disable ha's recorder from recording new statistics
     ha_recorder_switch(config.get('homeassistant'),'disable')
 
