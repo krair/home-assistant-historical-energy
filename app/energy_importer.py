@@ -147,13 +147,13 @@ def clean_data(data, config):
     df = pd.DataFrame.from_dict(filter_data, orient='columns')
     
     # Convert date to Unix timestamps as floats (if necessary)
-    match df['date'].dtype:
+    match df['start_ts'].dtype:
         case np.int64 | np.float64:
             pass
         case _:
             try:
                 # Convert from ISO to UNIX (UTC)
-                df['date'] = df['date'].apply(lambda x: datetime.timestamp(datetime.fromisoformat(x).astimezone(utc)))
+                df['start_ts'] = df['start_ts'].apply(lambda x: datetime.timestamp(datetime.fromisoformat(x).astimezone(utc)))
             except:
                 raise Exception('Date column is not in a familiar format (Unix or ISO)')
 
@@ -162,16 +162,16 @@ def clean_data(data, config):
     #    before) to fix HA graph for intervals shorter than 1 day
     time_offset = config.get('time_offset')
     if time_offset:
-        df['date'] = df['date'].apply(lambda x: x + int(time_offset))
+        df['start_ts'] = df['start_ts'].apply(lambda x: x + int(time_offset))
 
     # Deal with DST crossover in fall (duplicate timestamps on short-term data)
-    dup_idx = df[df.duplicated('date')].index
+    dup_idx = df[df.duplicated('start_ts')].index
     if any(dup_idx):
         # if we find any, move the duplicated entries back 1 second to avoid overlap
-        df.loc[dup_idx, ['date']] = [df.loc[dup_idx, ['date']].apply(lambda x: x - 1)]
+        df.loc[dup_idx, ['start_ts']] = [df.loc[dup_idx, ['start_ts']].apply(lambda x: x - 1)]
             
     # Rename columns to HomeAssistant's names
-    df.rename(columns={'value':'state','date':'start_ts'}, inplace=True)
+    #df.rename(columns={'value':'state','date':'start_ts'}, inplace=True)
     
     # Duplicate start_ts column - perhaps unnecessary
     df['created_ts'] = df['start_ts']
