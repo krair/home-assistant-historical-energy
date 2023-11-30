@@ -1,0 +1,14 @@
+version: 1
+formatters:
+  form01:
+    format: "%(asctime)s - %(levelname)s - %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: NOTSET
+    formatter: form01
+    stream: ext://sys.stdout
+root:
+  level: WARN
+  handlers: [console]

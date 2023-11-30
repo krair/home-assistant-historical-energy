@@ -14,6 +14,8 @@ from requests import post, get
 from pytz import utc
 from datetime import datetime, timedelta
 import yaml
+import logging
+import logging.config
 
 def load_config():
     with open(f'./config/config.yaml', 'r') as f:
@@ -246,6 +248,8 @@ def write_data_db(df, table, conn):
 
 # Read local config
 config = load_config()
+
+logging.config.fileConfig(config.get('logging'))
 
 # Set timezone (default in containers is UTC)
 if config.get('timezone'):
