@@ -160,9 +160,9 @@ def clean_data(data, config):
     
     # If needed, move data by a given amount to move the edge data points (ex: from 00:00:00 to the night
     #    before) to fix HA graph for intervals shorter than 1 day
-    time_offset = config.get('time_offset')
-    if time_offset:
-        df['start_ts'] = df['start_ts'].apply(lambda x: x + int(time_offset))
+    date_offset = config.get('date_offset')
+    if date_offset:
+        df['start_ts'] = df['start_ts'].apply(lambda x: x + int(date_offset))
 
     # Deal with DST crossover in fall (duplicate timestamps on short-term data)
     dup_idx = df[df.duplicated('start_ts')].index

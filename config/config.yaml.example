@@ -132,8 +132,8 @@ sensors:
       # What is the key within each reading used that contains the "date" or timestamp value
       date: date
 
-      # What is the key within each reading used that contains the "value" we want to insert into the database
-      value: value
+      # What is the key within each reading used that contains the "state" we want to insert into the database
+      state: value
 
       # Is the value a "measurement" at a point in time, or a "total_increasing" value that always increases.
       # This can be determined by looking at a couple of the returned datapoints. For example, we know we used:
@@ -152,3 +152,10 @@ sensors:
       #   This can be seen by comparing your "daily" consumption with the sum of your "30 min" interval consumption.
       #   Thus, dividing these 30 min values by 2
       conversion_factor: 0.5
+
+      # Sometimes the date timestamps can bleed into the wrong day. For example with Enedis: The final timestamp with the
+      #   30 min interval readings will be something like 2023-11-01 00:00:00. This will put the data as the first point
+      #   on November 1st, when in reality, it should be the final reading of October 31st. Thus we should shift the
+      #   timestamp back into the previous day. This setting is the number of seconds to move it back. Ex:
+      #   30 min backwards * 60 seconds = -1800
+      date_offset: -1800
