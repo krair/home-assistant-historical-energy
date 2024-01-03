@@ -4,6 +4,7 @@ written by Kit Rairigh - https://github.com/krair and https://rair.dev
 '''
 
 import os
+import sys
 import time
 import sqlalchemy as db
 import json
@@ -14,6 +15,10 @@ from requests import post, get
 from pytz import utc
 from datetime import datetime, timedelta
 import yaml
+
+USAGE = f"""Usage: python {sys.argv[0]} [--help] \n
+--import (-i) <filename> <setting> (set in config file)\n
+--delete (-d) <start>:<end> <sensor_name> (start/end in YYYY-MM-DD format, or blank to go to first/last)"""
 
 def load_config():
     with open(f'./config/config.yaml', 'r') as f:
@@ -74,18 +79,15 @@ def pull_db_metadata(conn):
     metadata.reflect(bind=conn)
     return metadata
 
-def get_metadata_ids(sensor_name):
+def get_metadata_ids(sensor_name, conn):
     '''
     Get the metadata id of the energy sensor where want to add the new data.
     We grab both the sensor id, as well as the sensor's cost id, if you are tracking it.
     If you aren't tracking cost, it will return None and not affect the rest.
     '''
-    metadata_id_search = conn.execute(db.text(f"select id, statistic_id \
-        from statistics_meta where statistics_meta.statistic_id = '{sensor_name}' \
-        or statistics_meta.statistic_id = '{sensor_name}_cost'")).all()
+    metadata_id_search = conn.execute(db.text(f"select id, statistic_id from statistics_meta where statistics_meta.statistic_id = '{sensor_name}' or statistics_meta.statistic_id = '{sensor_name}_cost'")).all()
     # Base ID is the first value, cost ID is the second value
-    metadata_id = *[x for x,y in metadata_id_search if 'cost' not in y],\
-    *[x for x,y in metadata_id_search if 'cost' in y]
+    metadata_id = *[x for x,y in metadata_id_search if 'cost' not in y], *[x for x,y in metadata_id_search if 'cost' in y]
     return metadata_id
 
 def build_request(request_config):
@@ -95,8 +97,8 @@ def build_request(request_config):
     This function could be reworked to be more generic, but need input from others using it. 
     '''
     request_dict = {'headers': request_config.get('headers'),
-            'url_req': request_config.get('url'),
-            'parameters': request_config.get('parameters')}
+                'url_req': request_config.get('url'),
+                'parameters': request_config.get('parameters')}
     if request_dict['parameters']['start'] == 'yesterday':
         request_dict['parameters']['start'] = str((datetime.today() - timedelta(days=1)).date())
     else:
@@ -118,9 +120,7 @@ def api_request(params):
     Relatively generic API request, given the parameters. No retries built in.
     '''
     try:
-        request = get(params.get("url_req"), \
-            headers=params.get("headers"), \
-            params=params.get("parameters"))
+        request = get(params.get("url_req"), headers=params.get("headers"), params=params.get("parameters"))
     except:
         raise Exception("Problem retrieving data!")
     if request.ok:
@@ -170,9 +170,6 @@ def clean_data(data, config):
         # if we find any, move the duplicated entries back 1 second to avoid overlap
         df.loc[dup_idx, ['start_ts']] = [df.loc[dup_idx, ['start_ts']].apply(lambda x: x - 1)]
             
-    # Rename columns to HomeAssistant's names
-    #df.rename(columns={'value':'state','date':'start_ts'}, inplace=True)
-    
     # Duplicate start_ts column - perhaps unnecessary
     df['created_ts'] = df['start_ts']
     
@@ -209,7 +206,7 @@ def calculate_conversion_factor(config):
     cf_config = float(config.get('conversion_factor', 1))
     return float(unit_cf * cf_config)
     
-def generate_merged_df(conn, tables, metadata_id, df):
+def generate_merged_df(conn, tables, metadata_id, df, upsert_method):
     '''
     Grabs all existing data for the sensor from HomeAssistant. We then join the data.
     The join is a "left-join" on the old data - this means that data already in the 
@@ -235,66 +232,172 @@ def generate_merged_df(conn, tables, metadata_id, df):
         #   Old id's will be found anyways with the (metadata_id, start_ts) unique constraint
         del df_merged['id']
     
-        write_data_db(df_merged, table, conn)
+        write_data_db(df_merged, table, conn, upsert_method)
 
-def write_data_db(df, table, conn):
+def write_data_db(df, table, conn, upsert_method):
     '''
     Write the pandas dataframe into the database using a customized method to imitate the
     "upsert" (insert and on conflict update)which isn't natively available in SQLAlchemy.
     '''
     df.to_sql(table, conn, index=False, chunksize=200, if_exists="append",method=upsert_method)
 
-# Read local config
-config = load_config()
+def delete_data(args):
+    start_delete, end_delete = args[0].split(':')
+    sensor_name = args[1]
 
-# Set timezone (default in containers is UTC)
-if config.get('timezone'):
-    set_timezone(config.get('timezone'))
+    if not start_delete == '':
+        start_delete = datetime.timestamp(datetime.fromisoformat(start_delete).astimezone(utc))
+    else: start_delete = "0"
 
-# Create connection to the database
-conn = create_engine(config['database'])
-# Check the connection is available
-check_db_connection(conn)
-# Pull the metadata about the db's tables from the db
-metadata = pull_db_metadata(conn)
+    if not end_delete == '':
+        end_delete = datetime.timestamp(datetime.fromisoformat(end_delete).astimezone(utc))
+    else: end_delete = datetime.timestamp(datetime.now().astimezone(utc))
 
-# Create 'upsert' method using existing metadata
-upsert_method = upsert.create_upsert_method(metadata)
+    #TODO: If sensor_name == 'all', cycle through all sensors
 
-# Each "sensor" gets it's own config section to ensure correct parsing and inserting
-for sensor in config.get('sensors'):
-    # The name of the energy sensor in HomeAssistant
-    sensor_name = sensor.get('sensor_name')
+    # Read local config
+    config = load_config()
 
-    # Get the metadata_id to use in the db tables
-    metadata_id = get_metadata_ids(sensor_name)
-    
-    # Configure the API request and run it
-    request_config = build_request(sensor)
-    data = api_request(request_config)
-    df = clean_data(data, sensor.get('data'))
-    # Temporarily disable ha's recorder from recording new statistics
+    # Set timezone (default in containers is UTC)
+    if config.get('timezone'):
+        set_timezone(config.get('timezone'))
+
+    # Create connection to the database
+    conn = create_engine(config['database'])
+    # Check the connection is available
+    check_db_connection(conn)
+    # Pull the metadata about the db's tables from the db
+    metadata = pull_db_metadata(conn)
+
+    metadata_id = get_metadata_ids(sensor_name, conn)
+
     ha_recorder_switch(config.get('homeassistant'),'disable')
 
-    # Which tables should we enter the data into (long for one measurement per day, or short for more frequent)
-    match sensor.get('type'):
-        case 'long':
-            tables = ['statistics']
-        case 'short':
-            tables = ['statistics_short_term', 'statistics']
+    tables = ['statistics_short_term', 'statistics']
+    for table in tables:
+        conn.execute(db.text(f"delete from {table} where ((metadata_id = {metadata_id[0]} or metadata_id = {metadata_id[1]}) and start_ts > {start_delete} and start_ts < {end_delete})"))
 
-    generate_merged_df(conn, tables, metadata_id[0], df)
-
-    # Cost per kWh
-    cost = sensor.get('cost', None)
-
-    if cost:
-        # Convert measurement to monetary cost
-        df['state'] = df['state'].apply(lambda x: x * cost)
-        generate_merged_df(conn, tables, metadata_id[1], df)
-    
     # Commit our changes and close the connection
     conn.commit()
     conn.close()
     # Re-enable ha's recorder for recording new statistics
     ha_recorder_switch(config.get('homeassistant'),'enable')
+
+def main(file):
+    # Read local config
+    config = load_config()
+
+    # Set timezone (default in containers is UTC)
+    if config.get('timezone'):
+        set_timezone(config.get('timezone'))
+
+    # Create connection to the database
+    conn = create_engine(config['database'])
+    # Check the connection is available
+    check_db_connection(conn)
+    # Pull the metadata about the db's tables from the db
+    metadata = pull_db_metadata(conn)
+
+    # Create 'upsert' method using existing metadata
+    upsert_method = upsert.create_upsert_method(metadata)
+
+    if not file:
+        # Each "sensor" gets it's own config section to ensure correct parsing and inserting
+        for sensor in config.get('sensors'):
+            # The name of the energy sensor in HomeAssistant
+            sensor_name = sensor.get('sensor_name')
+
+            # Get the metadata_id to use in the db tables
+            metadata_id = get_metadata_ids(sensor_name, conn)
+            
+            # Configure the API request and run it
+            request_config = build_request(sensor)
+            data = api_request(request_config)
+            df = clean_data(data, sensor.get('data'))
+            # Temporarily disable ha's recorder from recording new statistics
+            ha_recorder_switch(config.get('homeassistant'),'disable')
+
+            # Which tables should we enter the data into (long for one measurement per day, or short for more frequent)
+            match sensor.get('type'):
+                case 'long':
+                    tables = ['statistics']
+                case 'short':
+                    tables = ['statistics_short_term', 'statistics']
+
+            generate_merged_df(conn, tables, metadata_id[0], df, upsert_method)
+
+            # Cost per kWh
+            cost = sensor.get('cost', None)
+
+            if cost:
+                # Convert measurement to monetary cost
+                df['state'] = df['state'].apply(lambda x: x * cost)
+                generate_merged_df(conn, tables, metadata_id[1], df, upsert_method)
+            
+            # Commit our changes and close the connection
+            conn.commit()
+            conn.close()
+            # Re-enable ha's recorder for recording new statistics
+            ha_recorder_switch(config.get('homeassistant'),'enable')
+    else:
+        # file[0] should contain the filename
+        if file[0].endswith(".csv"):
+            try:
+                with open(file[0]) as f:
+                    df_file = pd.read_csv(f)
+            except:
+                raise Exception(f"File {file[0]} not readable.")
+        else:
+            raise Exception("Not a CSV file!")
+
+        # Get the correct configuration setting for the file from CLI args:
+        #   file[1] should contain the config name for the sensor
+        sensor = [i for i in config.get('sensors') if i.get('file',None) == file[1]][0]
+        # The name of the energy sensor in HomeAssistant
+        sensor_name = sensor.get('sensor_name')
+
+        # Get the metadata_id to use in the db tables
+        metadata_id = get_metadata_ids(sensor_name, conn)
+
+        df = clean_file(df_file, sensor.get('data'))
+
+        ha_recorder_switch(config.get('homeassistant'),'disable')
+
+        # Which tables should we enter the data into (long for one measurement per day, or short for more frequent)
+        match sensor.get('type'):
+            case 'long':
+                tables = ['statistics']
+            case 'short':
+                tables = ['statistics_short_term', 'statistics']
+
+        generate_merged_df(conn, tables, metadata_id[0], df, upsert_method)
+
+        # Cost per kWh
+        cost = sensor.get('cost', None)
+
+        if cost:
+            # Convert measurement to monetary cost
+            df['state'] = df['state'].apply(lambda x: x * cost)
+            generate_merged_df(conn, tables, metadata_id[1], df, upsert_method)
+        
+        # Commit our changes and close the connection
+        conn.commit()
+        conn.close()
+        # Re-enable ha's recorder for recording new statistics
+        ha_recorder_switch(config.get('homeassistant'),'enable')
+
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+
+    if not args:
+        main(None)
+    else:
+        match args[0]:
+            case '--import' | '-i':
+                main(args)
+            case '--delete' | '-d':
+                delete_data(args[1:])
+            case _:
+                raise SystemExit(USAGE)
